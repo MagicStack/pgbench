@@ -1,0 +1,14 @@
+#!/bin/bash
+
+
+_me=$(realpath $(readlink $0))
+_dir=$(dirname "${_me}")
+_venv="${_dir}/venv"
+
+if [ ! -d "${_venv}" ]; then
+    echo "venv is missing, run make"
+    exit 1
+fi
+
+source "${_venv}/bin/activate"
+exec "${_venv}/bin/python3" "${_dir}/pgbench_python.py"

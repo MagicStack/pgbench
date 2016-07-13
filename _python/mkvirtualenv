@@ -1,0 +1,27 @@
+#!/bin/bash
+
+set -e
+
+if [ -z "${1}" ]; then
+    echo "Must specify path to venv dir as first argument"
+    exit 1
+fi
+
+if [ -z "${2}" ]; then
+    echo "Must specify path to requirements.txt as second argument"
+    exit 1
+fi
+
+if [ -n "${VIRTUAL_ENV}" ]; then
+    # Already in virtual env, try to break out
+    PATH=$(echo -n $PATH | awk -v RS=: -v ORS=: '$0 != "'${VIRTUAL_ENV}/bin'"' | sed 's/:$//')
+    export PATH
+    unset VIRTUAL_ENV
+fi
+
+echo $PATH
+
+python3 -m venv "${1}"
+source "${1}/bin/activate"
+pip install -U pip wheel
+pip install -U -r "${2}"
