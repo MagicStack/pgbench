@@ -66,8 +66,7 @@ async def asyncpg_connect(args):
 
 
 async def asyncpg_execute(conn, query, args):
-    stmt = await conn.prepare(query)
-    return len(await stmt.get_list(*args))
+    return len(await conn.fetch(query, *args))
 
 
 async def worker(executor, eargs, start, duration, timeout):
