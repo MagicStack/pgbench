@@ -11,4 +11,4 @@ if [ ! -d "${_venv}" ]; then
 fi
 
 source "${_venv}/bin/activate"
-exec "${_venv}/bin/python3" "${_dir}/pgbench_python.py"
+exec "${_venv}/bin/python3" "${_dir}/pgbench_python.py" $@
