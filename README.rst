@@ -14,10 +14,16 @@ Install the following:
 - NodeJS
 - Go 1.6
 - Python 3
-- Numpy
 
-Prepare the toolbench by running ``make``.  This will download and build
-the driver implementations to prepare for benchmarks.
+Run
+
+.. code-block:: sh
+
+    $ python3 -m venv pgbench-venv
+    $ source pgbench-venv/bin/activate
+    (pgbench-venv) $ pip install -r requirements.txt
+    (pgbench-venv) $ make
+
 
 The benchmarks can then be ran with ``./pgbench``.  Use
 ``./pgbench --help`` for various options, including selective benchmark
