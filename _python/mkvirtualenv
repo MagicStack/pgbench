@@ -19,8 +19,6 @@ if [ -n "${VIRTUAL_ENV}" ]; then
     unset VIRTUAL_ENV
 fi
 
-echo $PATH
-
 python3 -m venv "${1}"
 source "${1}/bin/activate"
 pip install -U pip wheel
