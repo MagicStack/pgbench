@@ -1,0 +1,6 @@
+{
+  "setup": "CREATE TABLE _bytes(b bytea); INSERT INTO _bytes(b) VALUES ((SELECT repeat('a', 50000)::bytea));",
+  "teardown": "DROP TABLE _bytes;",
+  "query": "SELECT * FROM _bytes",
+  "args": []
+}

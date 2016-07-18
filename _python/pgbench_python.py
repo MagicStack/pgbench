@@ -114,7 +114,7 @@ def sync_worker(executor, eargs, start, duration, timeout):
 
 
 async def runner(args, connector, executor, is_async, arg_format, query,
-                 query_args):
+                 query_args, setup, teardown):
 
     timeout = args.timeout * 1000
     concurrency = args.concurrency
@@ -159,10 +159,21 @@ async def runner(args, connector, executor, is_async, arg_format, query,
 
         return results, end - start
 
-    if args.warmup_time:
-        await _do_run(args.warmup_time)
+    if setup:
+        admin_conn = await asyncpg.connect(user=args.pguser, host=args.pghost,
+                                           port=args.pgport)
+        await admin_conn.execute(setup)
 
-    results, duration = await _do_run(args.duration)
+    try:
+        if args.warmup_time:
+            await _do_run(args.warmup_time)
+
+        results, duration = await _do_run(args.duration)
+
+    finally:
+        if teardown:
+            await admin_conn.execute(teardown)
+            await admin_conn.close()
 
     for conn in conns:
         if is_async:
@@ -260,7 +271,12 @@ if __name__ == '__main__':
 
     query_args = querydata.get('args')
     if not query_args:
-        die('missing "args" in query JSON')
+        query_args = []
+
+    setup = querydata.get('setup')
+    teardown = querydata.get('teardown')
+    if setup and not teardown:
+        die('"setup" is present, but "teardown" is missing in query JSON')
 
     if args.driver == 'aiopg':
         connector, executor = aiopg_connect, aiopg_execute
@@ -282,5 +298,5 @@ if __name__ == '__main__':
         raise ValueError('unexpected driver: {!r}'.format(args.driver))
 
     runner_coro = runner(args, connector, executor, is_async, arg_format,
-                         query, query_args)
+                         query, query_args, setup, teardown)
     loop.run_until_complete(runner_coro)

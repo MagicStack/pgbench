@@ -1,0 +1,4 @@
+{
+  "query": "SELECT i FROM generate_series(1, $1) AS i",
+  "args": [1000]
+}

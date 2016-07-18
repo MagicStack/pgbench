@@ -47,7 +47,7 @@ func lib_pq_worker(
 	var recordPtr []interface{}
 	var colcount int
 
-	for time.Since(start) < duration {
+	for time.Since(start) < duration || duration == 0 {
 		req_start := time.Now()
 		rows, err := db.Query(query, query_args...)
 		if err != nil {
@@ -101,6 +101,9 @@ func lib_pq_worker(
 			min_latency = req_time
 		}
 		queries += 1
+		if duration == 0 {
+			break
+		}
 	}
 
 	db.Close()
@@ -142,7 +145,7 @@ func pgx_worker(
 		log.Fatal(err)
 	}
 
-	for time.Since(start) < duration {
+	for time.Since(start) < duration || duration == 0 {
 		req_start := time.Now()
 		rows, err := db.Query("testquery", fixed_query_args...)
 		if err != nil {
@@ -176,6 +179,9 @@ func pgx_worker(
 			min_latency = req_time
 		}
 		queries += 1
+		if duration == 0 {
+			break
+		}
 	}
 
 	db.Close()
@@ -224,8 +230,10 @@ var (
 )
 
 type QueryInfo struct {
-	Query string
-	Args  []interface{}
+	Setup    string
+	Teardown string
+	Query    string
+	Args     []interface{}
 }
 
 func main() {
@@ -298,15 +306,21 @@ func main() {
 		worker = lib_pq_worker
 	}
 
-	do_run := func(run_duration time.Duration, report ReportFunc) time.Duration {
+	do_run := func(
+		worker WorkerFunc,
+		query string, query_args []interface{},
+		concurrency int,
+		run_duration time.Duration,
+		report ReportFunc) time.Duration {
+
 		var wg sync.WaitGroup
-		wg.Add(*concurrency)
+		wg.Add(concurrency)
 
 		start := time.Now()
 
-		for i := 0; i < *concurrency; i += 1 {
-			go worker(start, run_duration, timeout, querydata.Query,
-				querydata.Args, &wg, report)
+		for i := 0; i < concurrency; i += 1 {
+			go worker(start, run_duration, timeout, query,
+				query_args, &wg, report)
 		}
 
 		wg.Wait()
@@ -314,11 +328,21 @@ func main() {
 		return time.Since(start)
 	}
 
-	if warmup_time > 0 {
-		do_run(warmup_time, nil)
+	if querydata.Setup != "" {
+		do_run(lib_pq_worker, querydata.Setup, nil, 1, 0, nil)
 	}
 
-	duration = do_run(duration, report)
+	if warmup_time > 0 {
+		do_run(worker, querydata.Query, querydata.Args, *concurrency,
+			warmup_time, nil)
+	}
+
+	duration = do_run(worker, querydata.Query, querydata.Args, *concurrency,
+		duration, report)
+
+	if querydata.Teardown != "" {
+		do_run(lib_pq_worker, querydata.Teardown, nil, 1, 0, nil)
+	}
 
 	data := make(map[string]interface{})
 	data["queries"] = queries

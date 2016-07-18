@@ -74,10 +74,15 @@ Each server is constrained to run in a single process.
 
 Test environment: ${__BENCHMARK_PLATFORM__}.
 
-<h2>Results</h2>
+<h2>Overall Results</h2>
 
-<svg id="bars" style="width: 80vw"></svg>
-<svg id="lats" style="width: 80vw"></svg>
+<svg id="mean-bars" style="width: 80vw"></svg>
+<svg id="mean-lats" style="width: 80vw"></svg>
+
+<h2>Individual Benchmarks</h2>
+
+${__BENCHMARK_QUERY_CONTENT__}
+
 
 <h2>Detailed Benchmark Data</h2>
 
@@ -123,14 +128,11 @@ function _drawLegend(chart, width, sizes) {
                 .text(function(d) { return d; });
 }
 
-function _copyAndSortBenchmarks(benchmarks) {
+function _copyAndSortResults(benchmarks) {
     var newBench = [];
     Array.prototype.push.apply(newBench, benchmarks);
     newBench.sort(function(e1, e2) {
-        return d3.ascending(e1.variations.reduce(function(s, el) {
-                                return s+el.rps }, 0),
-                            e2.variations.reduce(function(s, el) {
-                                return s+el.rps }, 0));
+        return d3.ascending(e1.data.rps, e2.data.rps);
     })
     return newBench
 }
@@ -145,19 +147,17 @@ var fullWidth = (options.width || 1000),
     margin = {top: 10, right: 65, bottom: 55, left: 65},
     width = fullWidth - margin.left - margin.right,
     height = fullHeight - margin.top - margin.bottom,
-    benchmarks = _copyAndSortBenchmarks(data.benchmarks);
+    benchmarks = _copyAndSortResults(data);
 
 // data reshape
 
 var maxRps = 0;
 benchmarks.forEach(function(bench) {
-    bench.variations.forEach(function(v) {
-        if (v.rps > maxRps) {
-            maxRps = v.rps
-        }
-    })
+    if (bench.data.rps > maxRps) {
+        maxRps = bench.data.rps
+    }
 });
-var sizes = data.queries;
+
 var names = benchmarks.map(function(d) { return d.name });
 
 // charting
@@ -168,9 +168,6 @@ var color = d3.scale.ordinal()
 var x0 = d3.scale.ordinal()
             .rangeRoundBands([0, width], .2)
             .domain(names);
-
-var x1 = d3.scale.ordinal();
-x1.domain(sizes).rangeRoundBands([0, x0.rangeBand()], .2);
 
 var y = d3.scale.linear()
             .range([height, 0])
@@ -226,35 +223,25 @@ chart.append("g")
                 .style("text-anchor", "end")
                 .text("Rows / sec");
 
-_drawLegend(chart, width, sizes);
-
-var bench = chart.selectAll(".bench")
+chart.selectAll("rect")
             .data(benchmarks)
-            .enter().append("g")
-                .attr("class", "bench")
-                .attr("transform", function(d) {
-                    return "translate(" + x0(d.name) + ",0)";
-                });
-
-bench.selectAll("rect")
-            .data(function(d) { return d.variations; })
             .enter().append("rect")
-                .attr("width", x1.rangeBand())
-                .attr("x", function(d, i) { return x1(sizes[i]); })
-                .attr("y", function(d) { return y(d.rps); })
-                .attr("height", function(d) { return height - y(d.rps); })
-                .style("fill", function(d, i) { return color(sizes[i]); })
+                .style("fill", function(d, i) { return color(0); })
+                .attr("width", x0.rangeBand())
+                .attr("x", function(d, i) { return x0(d.name); })
+                .attr("y", function(d) { return y(d.data.rps); })
+                .attr("height", function(d) { return height - y(d.data.rps); })
                 .on("mouseover", function(d, i) {
                     focusRect
-                        .attr('y', y(d.rps) - 9);
+                        .attr('y', y(d.data.rps) - 9);
 
                     focusLine
-                        .attr('y1', y(d.rps))
-                        .attr('y2', y(d.rps));
+                        .attr('y1', y(d.data.rps))
+                        .attr('y2', y(d.data.rps));
 
                     focusText
-                        .attr('y', y(d.rps))
-                        .text(d3.format("0,000")(Math.round(d.rps)));
+                        .attr('y', y(d.data.rps))
+                        .text(d3.format("0,000")(Math.round(d.data.rps)));
 
                     focus.style("display", null);
                 })
@@ -293,20 +280,17 @@ var fullWidth = (options.width || 1000),
     margin = {top: 10, right: 65, bottom: 55, left: 65},
     width = fullWidth - margin.left - margin.right,
     height = fullHeight - margin.top - margin.bottom,
-    benchmarks = _copyAndSortBenchmarks(data.benchmarks);
+    benchmarks = _copyAndSortResults(data);
 
 // data reshape
 
 var maxLat = 0;
 benchmarks.forEach(function(bench) {
-    bench.variations.forEach(function(v) {
-        if (v.latency_percentiles[4][1] > maxLat) {
-            maxLat = v.latency_percentiles[4][1];
-        }
-    })
+    if (bench.data.latency_percentiles[4][1] > maxLat) {
+        maxLat = bench.data.latency_percentiles[4][1];
+    }
 });
 
-var sizes = data.queries;
 var names = benchmarks.map(function(d) { return d.name });
 
 // charting
@@ -317,9 +301,6 @@ var color = d3.scale.ordinal()
 var x0 = d3.scale.ordinal()
             .rangeRoundBands([0, width], .2)
             .domain(names);
-
-var x1 = d3.scale.ordinal();
-x1.domain(sizes).rangeRoundBands([0, x0.rangeBand()], 0.3);
 
 var y = d3.scale.linear()
             .range([height, 0])
@@ -376,71 +357,61 @@ chart.append("g")
                 .style("text-anchor", "end")
                 .text("Latency (msec)");
 
-_drawLegend(chart, width, sizes);
-
-var bench = chart.selectAll(".bench")
+var g = chart.selectAll("rect")
             .data(benchmarks)
-            .enter().append("g")
-                .attr("class", "bench")
-                .attr("transform", function(d) {
-                    return "translate(" + x0(d.name) + ",0)";
-                });
-
-var g = bench.selectAll("rect")
-            .data(function(d) { return d.variations; })
             .enter().append("g")
                 .attr('class', 'sub');
 
 g.append('line')
-            .attr('y1', function(d) { return y(d.latency_percentiles[4][1]); })
-            .attr('y2', function(d) { return y(d.latency_percentiles[4][1]); })
-            .attr('x1', function(d, i) { return x1(sizes[i]); })
-            .attr('x2', function(d, i) { return x1(sizes[i]) + x1.rangeBand(); })
-            .style("stroke", function(d, i) { return color(sizes[i]); });
+            .attr('y1', function(d) { return y(d.data.latency_percentiles[4][1]); })
+            .attr('y2', function(d) { return y(d.data.latency_percentiles[4][1]); })
+            .attr('x1', function(d, i) { return x0(d.name); })
+            .attr('x2', function(d, i) { return x0(d.name) + x0.rangeBand(); })
+            .style("stroke", function(d, i) { return color(0); });
 
 g.append('line')
-            .attr('y1', function(d) { return y(d.latency_min); })
-            .attr('y2', function(d) { return y(d.latency_min); })
-            .attr('x1', function(d, i) { return x1(sizes[i]); })
-            .attr('x2', function(d, i) { return x1(sizes[i]) + x1.rangeBand(); })
-            .style("stroke", function(d, i) { return color(sizes[i]); });
+            .attr('y1', function(d) { return y(d.data.latency_min); })
+            .attr('y2', function(d) { return y(d.data.latency_min); })
+            .attr('x1', function(d, i) { return x0(d.name); })
+            .attr('x2', function(d, i) { return x0(d.name) + x0.rangeBand(); })
+            .style("stroke", function(d, i) { return color(0); });
 
 g.append('line')
-            .attr('y1', function(d) { return y(d.latency_percentiles[1][1]); })
-            .attr('y2', function(d) { return y(d.latency_percentiles[1][1]); })
-            .attr('x1', function(d, i) { return x1(sizes[i]); })
-            .attr('x2', function(d, i) { return x1(sizes[i]) + x1.rangeBand(); })
-            .style("stroke", function(d, i) { return color(sizes[i]); });
+            .attr('y1', function(d) { return y(d.data.latency_percentiles[1][1]); })
+            .attr('y2', function(d) { return y(d.data.latency_percentiles[1][1]); })
+            .attr('x1', function(d, i) { return x0(d.name); })
+            .attr('x2', function(d, i) { return x0(d.name) + x0.rangeBand(); })
+            .style("stroke", function(d, i) { return color(0); });
 
 g.append('line')
-            .attr('y1', function(d) { return y(d.latency_min); })
-            .attr('y2', function(d) { return y(d.latency_percentiles[0][1]) })
-            .attr('x1', function(d, i) { return x1(sizes[i]) + x1.rangeBand() / 2; })
-            .attr('x2', function(d, i) { return x1(sizes[i]) + x1.rangeBand() / 2; })
-            .style("stroke", function(d, i) { return color(sizes[i]); })
+            .attr('y1', function(d) { return y(d.data.latency_min); })
+            .attr('y2', function(d) { return y(d.data.latency_percentiles[0][1]) })
+            .attr('x1', function(d, i) { return x0(d.name) + x0.rangeBand() / 2; })
+            .attr('x2', function(d, i) { return x0(d.name) + x0.rangeBand() / 2; })
+            .style("stroke", function(d, i) { return color(0); })
             .style("stroke-dasharray", "2,2");
 
 g.append('line')
-            .attr('y1', function(d) { return y(d.latency_percentiles[4][1]); })
-            .attr('y2', function(d) { return y(d.latency_percentiles[2][1]) })
-            .attr('x1', function(d, i) { return x1(sizes[i]) + x1.rangeBand() / 2; })
-            .attr('x2', function(d, i) { return x1(sizes[i]) + x1.rangeBand() / 2; })
-            .style("stroke", function(d, i) { return color(sizes[i]); })
+            .attr('y1', function(d) { return y(d.data.latency_percentiles[4][1]); })
+            .attr('y2', function(d) { return y(d.data.latency_percentiles[2][1]) })
+            .attr('x1', function(d, i) { return x0(d.name) + x0.rangeBand() / 2; })
+            .attr('x2', function(d, i) { return x0(d.name) + x0.rangeBand() / 2; })
+            .style("stroke", function(d, i) { return color(0); })
             .style("stroke-dasharray", "2,2");
 
 g.append('rect')
-            .attr('y', function(d) { return y(d.latency_percentiles[2][1]); })
-            .attr('x', function(d, i) { return x1(sizes[i]); })
-            .attr("width", x1.rangeBand())
-            .attr('height', function(d) { return Math.abs(y(d.latency_percentiles[2][1]) - y(d.latency_percentiles[0][1])) })
-            .style("stroke", function(d, i) { return color(sizes[i]); })
+            .attr('y', function(d) { return y(d.data.latency_percentiles[2][1]); })
+            .attr('x', function(d, i) { return x0(d.name); })
+            .attr("width", x0.rangeBand())
+            .attr('height', function(d) { return Math.abs(y(d.data.latency_percentiles[2][1]) - y(d.data.latency_percentiles[0][1])) })
+            .style("stroke", function(d, i) { return color(0); })
             .style("fill", 'rgba(0, 0, 0, 0)');
 
 g.append('rect')
             .attr('y', 0)
             .attr('height', height)
-            .attr('x', function(d, i) { return x1(sizes[i]); })
-            .attr('width', function(d) { return x1.rangeBand(); })
+            .attr('x', function(d, i) { return x0(d.name); })
+            .attr('width', function(d) { return x0.rangeBand(); })
             .style('fill', 'rgba(0, 0, 0, 0)')
             .on("mouseout", function(d, i) {
                 d3.select(this).style('fill', 'rgba(0, 0, 0, 0)');
@@ -449,7 +420,7 @@ g.append('rect')
             .on("mouseover", function(d, i) {
                 d3.select(this).style('fill', 'rgba(0, 0, 0, 0.04)');
 
-                var yMedian = y(d.latency_percentiles[1][1]);
+                var yMedian = y(d.data.latency_percentiles[1][1]);
 
                 focus
                     .style('display', null);
@@ -467,7 +438,7 @@ g.append('rect')
 
                     focusText
                         .attr('y', yMedian)
-                        .text(d3.format(".2f")(d.latency_percentiles[1][1]));
+                        .text(d3.format(".2f")(d.data.latency_percentiles[1][1]));
 
             });
 
@@ -495,19 +466,43 @@ var focusText = focus.append('text')
 
 var data = ${__BENCHMARK_DATA_JSON__};
 
-var tcpData = {
-    queries: data.querynames,
-    benchmarks: data.benchmarks
-}
-
-options = {
+var options = {
     width: 800,
     height: 300,
     showBenchmarkType: true
 }
 
-drawBars('#bars', tcpData, options);
-drawLats('#lats', tcpData, options);
+var meanData = [];
+for (var i = 0; i < data.benchmarks.length; i += 1) {
+    var benchmark = data.benchmarks[i];
+    meanData.push({
+        'name': benchmark['name'],
+        'data': benchmark['mean']
+    })
+}
+
+drawBars('#mean-bars', meanData, options);
+drawLats('#mean-lats', meanData, options);
+
+var queriesSection = document.getElementById("queries");
+var nqueries = data.querynames.length;
+
+for (var i = 0; i < data.concurrency_levels.length; i += 1) {
+    for (var j = 0; j < data.querynames.length; j += 1) {
+        var queryData = [];
+        var offset = i * nqueries + j;
+        for (var k = 0; k < data.benchmarks.length; k += 1) {
+            var benchmark = data.benchmarks[k];
+            queryData.push({
+                'name': benchmark['name'],
+                'data': benchmark['variations'][offset]
+            });
+        }
+
+        drawBars('#query-bars-' + offset, queryData, options);
+        drawLats('#query-lats-' + offset, queryData, options);
+    }
+}
 </script>
 
 </body>

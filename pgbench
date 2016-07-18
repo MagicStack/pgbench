@@ -11,6 +11,7 @@ import argparse
 import collections
 import datetime
 import glob
+import html
 import json
 import math
 import os.path
@@ -21,6 +22,7 @@ import subprocess
 import sys
 import warnings
 
+import asyncpg.cluster
 import numpy as np
 
 
@@ -78,14 +80,17 @@ def weighted_quantile(values, quantiles, weights):
     values = np.array(values)
     quantiles = np.array(quantiles)
     weights = np.array(weights)
-    assert np.all(quantiles >= 0) and np.all(quantiles <= 1), \
-                 'quantiles should be in [0, 1]'
+    if not (np.all(quantiles >= 0) and np.all(quantiles <= 1)):
+        raise ValueError('quantiles should be in [0, 1]')
 
     weighted_quantiles = np.cumsum(weights) - 0.5 * weights
     weighted_quantiles -= weighted_quantiles[0]
     weighted_quantiles /= weighted_quantiles[-1]
 
     return np.interp(quantiles, weighted_quantiles, values)
+
+
+percentiles = [25, 50, 75, 90, 99, 99.99]
 
 
 def calc_latency_stats(queries, rows, duration, min_latency, max_latency,
@@ -97,7 +102,6 @@ def calc_latency_stats(queries, rows, duration, min_latency, max_latency,
     latency_std = math.sqrt(variance)
     latency_cv = latency_std / mean_latency
 
-    percentiles = [25, 50, 75, 90, 99, 99.99]
     percentile_data = []
 
     quantiles = weighted_quantile(arange, [p / 100 for p in percentiles],
@@ -122,6 +126,37 @@ def calc_latency_stats(queries, rows, duration, min_latency, max_latency,
     return data
 
 
+def _geom_mean(values):
+    p = 1
+    root = 0
+    for val in values:
+        p *= val
+        root += 1
+
+    return p ** (1.0 / root)
+
+
+def mean_latency_stats(data):
+    data = dict(
+        duration=round(_geom_mean(d['duration'] for d in data), 2),
+        queries=round(_geom_mean(d['queries'] for d in data), 2),
+        qps=round(_geom_mean(d['qps'] for d in data), 2),
+        rps=round(_geom_mean(d['rps'] for d in data), 2),
+        latency_min=round(_geom_mean(d['latency_min'] for d in data), 3),
+        latency_mean=round(_geom_mean(d['latency_mean'] for d in data), 3),
+        latency_max=round(_geom_mean(d['latency_max'] for d in data), 3),
+        latency_std=round(_geom_mean(d['latency_std'] for d in data), 3),
+        latency_cv=round(_geom_mean(d['latency_cv'] for d in data), 2),
+        latency_percentiles=[
+            (p, round(_geom_mean(d['latency_percentiles'][i][1] for d in data),
+                      3))
+            for i, p in enumerate(percentiles)
+        ]
+    )
+
+    return data
+
+
 def format_text(data):
     data = dict(data)
 
@@ -141,7 +176,14 @@ Rows/sec: {rps}
 
 
 def process_results(results):
-    lat_data = json.loads(results)
+    try:
+        lat_data = json.loads(results)
+    except json.JSONDecodeError as e:
+        print('could not process benchmark results: {}'.format(e),
+              file=sys.stderr)
+        print(results, file=sys.stderr)
+        sys.exit(1)
+
     latency_stats = np.array(lat_data['latency_stats'])
 
     return calc_latency_stats(
@@ -190,8 +232,23 @@ def format_report(data, target_file):
 
         brecords = entry['benchmarks']
         variations = benchmark['variations']
-        i = 0
 
+        bmean = benchmark['mean']
+
+        brecords['Queries/sec'].append(
+            bmean['qps'])
+        brecords['Rows/sec'].append(
+            '{}'.format(bmean['rps']))
+        brecords['Min latency'].append(
+            '{}ms'.format(bmean['latency_min']))
+        brecords['Mean latency'].append(
+            '{}ms'.format(bmean['latency_mean']))
+        brecords['Max latency'].append(
+            '{}ms'.format(bmean['latency_max']))
+        brecords['Latency variation'].append('{}ms ({}%)'.format(
+            bmean['latency_std'], bmean['latency_cv']))
+
+        i = 0
         for concurrency in data['concurrency_levels']:
             for query in data['querynames']:
                 variation = variations[i]
@@ -212,13 +269,37 @@ def format_report(data, target_file):
 
     vc = len(data['concurrency_levels']) * len(data['querynames'])
 
-    variations_th = []
-    for concurrency in data['concurrency_levels']:
-        for queryname in data['querynames']:
+    variations_th = ['<th>Geometric mean</th>']
+    query_content = []
+    nqueries = len(data['querynames'])
+
+    for i, concurrency in enumerate(data['concurrency_levels']):
+        for j, queryname in enumerate(data['querynames']):
             variations_th.append(
                 '<th>{}</th>'.format(
                     '{} x{}'.format(queryname, concurrency)
                 )
+            )
+
+            query_data = data['queries'][j]
+
+            query_content.append(
+                '''
+                    <h3>{n} x{c}</h3>
+                    <h4>Test Setup</h4>
+                    <pre style="white-space: pre-wrap;
+                                margin-bottom: 10px;
+                                margin-left: 40px;">{setupquery}</pre>
+                    <h4>Test Query</h4>
+                    <pre style="white-space: pre-wrap;
+                                margin-bottom: 10px;
+                                margin-left: 40px;">{query}</pre>
+                    <svg id="query-bars-{id}" style="width: 80vw"></svg>
+                    <svg id="query-lats-{id}" style="width: 80vw"></svg>
+                '''.format(n=queryname, c=concurrency, id=i * nqueries + j,
+                           query=html.escape(query_data['query']),
+                           setupquery=html.escape(
+                               query_data.get('setup', 'N/A')))
             )
 
     record_trs = []
@@ -258,7 +339,8 @@ def format_report(data, target_file):
         __BENCHMARK_DATE__=date,
         __BENCHMARK_PLATFORM__=platform,
         __BENCHMARK_DATA_TABLE__=table,
-        __BENCHMARK_DATA_JSON__=json.dumps(data)
+        __BENCHMARK_DATA_JSON__=json.dumps(data),
+        __BENCHMARK_QUERY_CONTENT__='\n'.join(query_content)
     )
 
     with open(target_file, 'wt') as f:
@@ -275,6 +357,85 @@ BENCHMARKS = [
     'nodejs-pg',
     'nodejs-pg-native',
 ]
+
+
+def run_benchmarks(args, variations, pghost, pgport, pguser):
+    if args.benchmark:
+        benchmarks_to_run = [re.compile(b) for b in args.benchmark]
+    else:
+        benchmarks_to_run = [re.compile(re.escape(b)) for b in BENCHMARKS]
+
+    mydir = os.path.dirname(os.path.realpath(__file__))
+
+    benchmarks_data = []
+
+    for benchmark in BENCHMARKS:
+        if not any(b.match(benchmark) for b in benchmarks_to_run):
+            continue
+
+        msg = 'Running {} benchmarks...'.format(benchmark)
+        print(msg)
+        print('=' * len(msg))
+        print()
+
+        platform, _, driver = benchmark.partition('-')
+        runner = os.path.join(mydir, 'pgbench_{}'.format(platform))
+
+        runner_args = {
+            'warmup-time': args.warmup_time,
+            'duration': args.duration,
+            'timeout': args.timeout,
+            'pghost': pghost,
+            'pgport': pgport,
+            'pguser': pguser,
+            'output-format': 'json'
+        }
+
+        runner_switches = ['--{}={}'.format(k.replace('_', '-'), v)
+                           for k, v in runner_args.items()]
+
+        benchmark_data = {
+            'name': benchmark,
+            'variations': [],
+            'mean': {}
+        }
+
+        benchmarks_data.append(benchmark_data)
+
+        for variation in variations:
+            print(variation['title'])
+            print('-' * len(variation['title']))
+            print()
+            cmdline = [runner] + runner_switches + \
+                      ['--concurrency={}'.format(variation['concurrency'])] + \
+                      [driver, variation['queryfile']]
+            print(' '.join(cmdline))
+
+            runner_proc = subprocess.run(
+                cmdline, stdout=subprocess.PIPE, stderr=sys.stderr)
+
+            if runner_proc.returncode != 0:
+                msg = 'fatal: benchmark runner exited with exit ' \
+                      'code {}'.format(runner_proc.returncode)
+                print(msg)
+                sys.exit(runner_proc.returncode)
+
+            data = process_results(runner_proc.stdout.decode('utf-8'))
+            benchmark_data['variations'].append(data)
+
+            print(format_text(data))
+
+        mean = mean_latency_stats(benchmark_data['variations'])
+        benchmark_data['mean'] = mean
+
+        if len(variations) > 1:
+            msg = 'Geometric mean results'
+            print(msg)
+            print('-' * len(msg))
+            print()
+            print(format_text(mean))
+
+    return benchmarks_data
 
 
 def main():
@@ -299,8 +460,9 @@ def main():
         '--save-html', '-H', type=str,
         help='path to save benchmark results in HTML format')
     parser.add_argument(
-        '--pghost', type=str, default='127.0.0.1',
-        help='PostgreSQL server host')
+        '--pghost', type=str,
+        help='PostgreSQL server host.  If not specified, ' +
+             'a temporary cluster will be used.')
     parser.add_argument(
         '--pgport', type=int, default=5432,
         help='PostgreSQL server port')
@@ -314,12 +476,6 @@ def main():
         nargs='*')
 
     args = parser.parse_args()
-
-    if args.benchmark:
-        benchmarks_to_run = [re.compile(b) for b in args.benchmark]
-    else:
-        benchmarks_to_run = [re.compile(re.escape(b)) for b in BENCHMARKS]
-
     mydir = os.path.dirname(os.path.realpath(__file__))
 
     concurrency_levels = \
@@ -333,15 +489,18 @@ def main():
             for f in glob.glob(os.path.join(mydir, 'queries', '*.json'))
         ]
 
-    benchmarks_data = []
-
     variations = []
     querynames = []
+    queries = []
 
     for concurrency in concurrency_levels:
         for queryfile in sorted(queryfiles):
             queryname = os.path.basename(queryfile)
             querynames.append(queryname)
+
+            with open(os.path.join(mydir, queryfile)) as f:
+                querydata = json.load(f)
+                queries.append(querydata)
 
             variations.append({
                 'title': '{}, concurrency {}'.format(
@@ -351,79 +510,48 @@ def main():
                 'queryfile': queryfile,
             })
 
-    for benchmark in BENCHMARKS:
-        if not any(b.match(benchmark) for b in benchmarks_to_run):
-            continue
+    if not args.pghost:
+        print('Initializing temporary PostgreSQL cluster...')
+        pg_cluster = asyncpg.cluster.TempCluster()
+        pg_cluster.init(user='postgres')
+        pg_cluster.trust_local_connections()
+        pg_cluster.start(port='dynamic')
 
-        msg = 'Running {} benchmarks...'.format(benchmark)
-        print(msg)
-        print('=' * len(msg))
-        print()
+        pghost, pgport = pg_cluster.get_connection_addr()
+        pguser = 'postgres'
+    else:
+        pg_cluster = None
+        pghost = args.pghost
+        pgport = args.pgport
+        pguser = args.pguser
 
-        platform, _, driver = benchmark.partition('-')
-        runner = os.path.join(mydir, 'pgbench_{}'.format(platform))
-
-        runner_args = {
-            'warmup-time': args.warmup_time,
-            'duration': args.duration,
-            'timeout': args.timeout,
-            'pghost': args.pghost,
-            'pgport': args.pgport,
-            'pguser': args.pguser,
-            'output-format': 'json'
-        }
-
-        runner_switches = ['--{}={}'.format(k.replace('_', '-'), v)
-                           for k, v in runner_args.items()]
-
-        benchmark_data = {
-            'name': benchmark,
-            'variations': []
-        }
-
-        benchmarks_data.append(benchmark_data)
-
-        for variation in variations:
-            print(variation['title'])
-            print('-' * len(variation['title']))
-            print()
-            cmdline = [runner] + runner_switches + \
-                      ['--concurrency={}'.format(variation['concurrency'])] + \
-                      [driver, variation['queryfile']]
-            print(' '.join(cmdline))
-
-            runner_proc = subprocess.run(
-                cmdline, stdout=subprocess.PIPE, stderr=sys.stderr)
-
-            if runner_proc.returncode != 0:
-                msg = 'fatal: benchmark runner exited with exit code {}'.\
-                        format(runner_proc.returncode)
-                print(msg)
-                sys.exit(runner_proc.returncode)
-
-            data = process_results(runner_proc.stdout.decode('utf-8'))
-            benchmark_data['variations'].append(data)
-
-            print(format_text(data))
+    try:
+        benchmarks_data = \
+            run_benchmarks(args, variations, pghost, pgport, pguser)
+    finally:
+        if pg_cluster is not None:
+            pg_cluster.stop()
+            pg_cluster.destroy()
 
     if args.save_json or args.save_html:
         plat_info = platform_info()
 
-        benchmarks_data = {
+        report_data = {
             'date': '%Y-%m-%dT%H:%M:%S%z',
             'duration': args.duration,
             'platform': plat_info,
             'concurrency_levels': concurrency_levels,
             'querynames': querynames,
+            'queries': queries,
             'benchmarks': benchmarks_data,
         }
 
     if args.save_json:
         with open(args.save_json, 'w') as f:
-            json.dump(benchmarks_data, f)
+            json.dump(report_data, f)
 
     if args.save_html:
-        format_report(benchmarks_data, args.save_html)
+        format_report(report_data, args.save_html)
 
 
 if __name__ == '__main__':

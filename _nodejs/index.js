@@ -15,7 +15,7 @@ const argparse = require('argparse');
 const pg = require('pg');
 
 
-function _connect(driverName, callback) {
+function _connect(driverName, args, callback) {
     let driver = null;
 
     if (driverName == 'pg') {
@@ -27,8 +27,10 @@ function _connect(driverName, callback) {
     }
 
     var client = new driver.Client({
-        'user': 'postgres',
-        'database': 'postgres'
+        'user': args.pguser,
+        'database': 'postgres',
+        'host': args.pghost,
+        'port': args.pgport
     });
 
     client.connect(function(err) {
@@ -53,7 +55,7 @@ function execute(conn, query, query_args, callback) {
 }
 
 
-function runner(args, query, query_args) {
+function runner(args, querydata) {
     var duration = args.duration;
     var timeout_in_us = args.timeout * 1000000;
 
@@ -63,6 +65,10 @@ function runner(args, query, query_args) {
     var queries = 0;
     var rows = 0;
     var latency_stats = null;
+    var query = querydata.query;
+    var query_args = querydata.args;
+    var setup_query = querydata.setup;
+    var teardown_query = querydata.teardown;
 
     function _report_results(t_queries, t_rows, t_latency_stats,
                              t_min_latency, t_max_latency, run_start) {
@@ -103,11 +109,13 @@ function runner(args, query, query_args) {
         }
     }
 
-    function _do_run(run_duration, report) {
+    function _do_run(driver, query, query_args, concurrency, run_duration,
+                     report, cb) {
         var run_start = _now();
+        var complete = 0;
 
-        for (var i = 0; i < args.concurrency; i += 1) {
-            _connect(args.driver, function(err, conn) {
+        for (var i = 0; i < concurrency; i += 1) {
+            _connect(driver, args, function(err, conn) {
                 if (err) {
                     throw err;
                 }
@@ -150,6 +158,11 @@ function runner(args, query, query_args) {
                                             min_latency, max_latency,
                                             run_start);
                         }
+
+                        complete += 1;
+                        if (complete == concurrency && cb) {
+                            cb();
+                        }
                     }
                 };
 
@@ -159,11 +172,42 @@ function runner(args, query, query_args) {
         }
     }
 
-    if (args.warmup_time) {
-        _do_run(args.warmup_time, false);
+    function _setup(cb) {
+        if (setup_query) {
+            // pg-native does not like multiple statements in queries
+            _do_run('pg', setup_query, [], 1, 0, false, cb);
+        } else {
+            if (cb) {
+                cb();
+            }
+        }
     }
 
-    _do_run(duration, true);
+    function _teardown(cb) {
+        if (teardown_query) {
+            _do_run('pg', teardown_query, [], 1, 0, false, cb);
+        } else {
+            if (cb) {
+                cb();
+            }
+        }
+    }
+
+    function _run() {
+        _do_run(args.driver, query, query_args, args.concurrency, duration,
+                true, _teardown);
+    }
+
+    function _warmup_and_run() {
+        if (args.warmup_time) {
+            _do_run(args.driver, query, query_args, args.concurrency,
+                    args.warmup_time, false, _run);
+        } else {
+            _run();
+        }
+    }
+
+    _setup(_warmup_and_run);
 
     return;
 }
@@ -232,7 +276,7 @@ function main() {
     queryfile.on('data', (chunk) => {querydata_json += chunk});
     queryfile.on('end', () => {
         let querydata = JSON.parse(querydata_json);
-        runner(args, querydata.query, querydata.args);
+        runner(args, querydata);
     });
 }
 
