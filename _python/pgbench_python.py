@@ -22,6 +22,7 @@ import aiopg
 import asyncpg
 import postgresql
 import psycopg2
+import psycopg2.extras
 
 
 def psycopg_connect(args):
@@ -31,7 +32,7 @@ def psycopg_connect(args):
 
 
 def psycopg_execute(conn, query, args):
-    cur = conn.cursor()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     cur.execute(query, args)
     return len(cur.fetchall())
 
@@ -54,7 +55,7 @@ async def aiopg_connect(args):
 
 
 async def aiopg_execute(conn, query, args):
-    cur = await conn.cursor()
+    cur = await conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     await cur.execute(query, args)
     return len(await cur.fetchall())
 
