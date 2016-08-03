@@ -1,5 +1,5 @@
 {
-  "setup": "CREATE TABLE _bytes(b bytea); INSERT INTO _bytes(b) VALUES ((SELECT repeat('a', 50000)::bytea));",
+  "setup": "CREATE TABLE _bytes(b bytea); INSERT INTO _bytes(b) (SELECT repeat('a', 1000)::bytea FROM generate_series(1, 100));",
   "teardown": "DROP TABLE _bytes;",
   "query": "SELECT * FROM _bytes",
   "args": []
