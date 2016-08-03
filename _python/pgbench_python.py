@@ -291,7 +291,7 @@ if __name__ == '__main__':
         connector, executor = aiopg_connect, aiopg_execute
         is_async = True
         arg_format = 'python'
-    if args.driver == 'aiopg-tuples':
+    elif args.driver == 'aiopg-tuples':
         connector, executor = aiopg_tuples_connect, aiopg_tuples_execute
         is_async = True
         arg_format = 'python'
