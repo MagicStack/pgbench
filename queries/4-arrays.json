@@ -1,5 +1,5 @@
 {
-  "setup": "CREATE TABLE _test(a int[], b text[]); INSERT INTO _test(a, b) SELECT array_agg(i), array_agg('entry-' || i::text) FROM generate_series(1, 100) as s(i);",
+  "setup": "CREATE TABLE _test(a int[]); INSERT INTO _test(a) (SELECT (SELECT array_agg(i) FROM generate_series(1, 1000) as s(i)) FROM generate_series(1, 10));",
   "teardown": "DROP TABLE _test;",
   "query": "SELECT * FROM _test",
   "args": []
