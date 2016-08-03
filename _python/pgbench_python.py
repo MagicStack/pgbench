@@ -53,9 +53,17 @@ async def aiopg_connect(args):
                                port=args.pgport)
     return conn
 
-
 async def aiopg_execute(conn, query, args):
     cur = await conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    await cur.execute(query, args)
+    return len(await cur.fetchall())
+
+
+aiopg_tuples_connect = aiopg_connect
+
+
+async def aiopg_tuples_execute(conn, query, args):
+    cur = await conn.cursor()
     await cur.execute(query, args)
     return len(await cur.fetchall())
 
@@ -252,7 +260,7 @@ if __name__ == '__main__':
         help='PostgreSQL server user')
     parser.add_argument(
         'driver', help='driver implementation to use',
-        choices=['aiopg', 'asyncpg', 'psycopg', 'postgresql'])
+        choices=['aiopg', 'aiopg-tuples', 'asyncpg', 'psycopg', 'postgresql'])
     parser.add_argument(
         'queryfile', help='file to read benchmark query information from')
 
@@ -281,6 +289,10 @@ if __name__ == '__main__':
 
     if args.driver == 'aiopg':
         connector, executor = aiopg_connect, aiopg_execute
+        is_async = True
+        arg_format = 'python'
+    if args.driver == 'aiopg-tuples':
+        connector, executor = aiopg_tuples_connect, aiopg_tuples_execute
         is_async = True
         arg_format = 'python'
     elif args.driver == 'asyncpg':
