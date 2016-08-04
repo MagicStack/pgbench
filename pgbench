@@ -294,10 +294,15 @@ def format_report(data, target_file):
                     <pre style="white-space: pre-wrap;
                                 margin-bottom: 10px;
                                 margin-left: 40px;">{query}</pre>
+                    <pre style="white-space: pre-wrap;
+                                margin-bottom: 10px;
+                                margin-left: 40px;">Args: {args}</pre>
                     <svg id="query-bars-{id}" style="width: 80vw"></svg>
                     <svg id="query-lats-{id}" style="width: 80vw"></svg>
                 '''.format(n=queryname, c=concurrency, id=i * nqueries + j,
                            query=html.escape(query_data['query']),
+                           args=html.escape(
+                               repr(query_data.get('args') or [])),
                            setupquery=html.escape(
                                query_data.get('setup', 'N/A')))
             )
