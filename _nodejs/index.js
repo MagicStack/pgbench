@@ -107,10 +107,14 @@ function runner(args, querydata) {
     }
 
     function _do_run(driver, query, query_args, concurrency, run_duration,
-                     report, cb) {
+                     report, use_prepared_stmt, cb) {
         var run_start = _now();
         var complete = 0;
-        var stmt = {name: '_pgbench_query', text: query, values: query_args};
+        var stmt = {text: query, values: query_args};
+
+        if (use_prepared_stmt) {
+            stmt.name = '_pgbench_query';
+        }
 
         for (var i = 0; i < concurrency; i += 1) {
             _connect(driver, args, function(err, conn) {
@@ -174,7 +178,7 @@ function runner(args, querydata) {
     function _setup(cb) {
         if (setup_query) {
             // pg-native does not like multiple statements in queries
-            _do_run('pg', setup_query, [], 1, 0, false, cb);
+            _do_run('pg', setup_query, [], 1, 0, false, false, cb);
         } else {
             if (cb) {
                 cb();
@@ -184,7 +188,7 @@ function runner(args, querydata) {
 
     function _teardown(cb) {
         if (teardown_query) {
-            _do_run('pg', teardown_query, [], 1, 0, false, cb);
+            _do_run('pg', teardown_query, [], 1, 0, false, false, cb);
         } else {
             if (cb) {
                 cb();
@@ -194,13 +198,13 @@ function runner(args, querydata) {
 
     function _run() {
         _do_run(args.driver, query, query_args, args.concurrency, duration,
-                true, _teardown);
+                true, true, _teardown);
     }
 
     function _warmup_and_run() {
         if (args.warmup_time) {
             _do_run(args.driver, query, query_args, args.concurrency,
-                    args.warmup_time, false, _run);
+                    args.warmup_time, false, true, _run);
         } else {
             _run();
         }
