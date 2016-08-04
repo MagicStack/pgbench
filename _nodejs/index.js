@@ -7,6 +7,8 @@
 //
 
 
+"use strict";
+
 const fs = require('fs');
 const path = require('path');
 const process = require('process');
@@ -47,11 +49,6 @@ function _connect(driverName, args, callback) {
 function _now() {
     var [s, ns] = process.hrtime();
     return s * 1000000 + Math.round(ns / 1000);
-}
-
-
-function execute(conn, query, query_args, callback) {
-    conn.query(query, query_args, callback);
 }
 
 
@@ -113,6 +110,7 @@ function runner(args, querydata) {
                      report, cb) {
         var run_start = _now();
         var complete = 0;
+        var stmt = {name: '_pgbench_query', text: query, values: query_args};
 
         for (var i = 0; i < concurrency; i += 1) {
             _connect(driver, args, function(err, conn) {
@@ -127,6 +125,7 @@ function runner(args, querydata) {
                 var max_latency = 0.0;
                 var duration_in_us = run_duration * 1000000;
                 var req_start;
+                var req_time;
 
                 var _cb = function(err, result) {
                     if (err) {
@@ -150,7 +149,7 @@ function runner(args, querydata) {
 
                     if (_now() - run_start < duration_in_us) {
                         req_start = _now();
-                        execute(conn, query, query_args, _cb);
+                        conn.query(stmt, _cb);
                     } else {
                         conn.end();
                         if (report) {
@@ -167,7 +166,7 @@ function runner(args, querydata) {
                 };
 
                 req_start = _now();
-                execute(conn, query, query_args, _cb);
+                conn.query(stmt, _cb);
             });
         }
     }
