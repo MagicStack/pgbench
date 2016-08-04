@@ -54,12 +54,12 @@ func lib_pq_worker(
 			log.Fatal(err)
 		}
 
-		columns, err := rows.Columns()
-		if err != nil {
-			log.Fatal(err)
-		}
-
 		if cap(record) == 0 {
+			columns, err := rows.Columns()
+			if err != nil {
+				log.Fatal(err)
+			}
+
 			colcount = len(columns)
 			record = make([]interface{}, colcount)
 			recordPtr = make([]interface{}, colcount)
