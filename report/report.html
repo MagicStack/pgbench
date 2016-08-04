@@ -133,15 +133,6 @@ function _drawLegend(chart, width, sizes) {
                 .text(function(d) { return d; });
 }
 
-function _copyAndSortResults(benchmarks) {
-    var newBench = [];
-    Array.prototype.push.apply(newBench, benchmarks);
-    newBench.sort(function(e1, e2) {
-        return d3.ascending(e1.data.rps, e2.data.rps);
-    })
-    return newBench
-}
-
 function drawBars(elSelector, data, options) {'use strict';
 options = options || {};
 
@@ -152,7 +143,7 @@ var fullWidth = (options.width || 1000),
     margin = {top: 10, right: 65, bottom: 55, left: 65},
     width = fullWidth - margin.left - margin.right,
     height = fullHeight - margin.top - margin.bottom,
-    benchmarks = _copyAndSortResults(data);
+    benchmarks = data;
 
 // data reshape
 
@@ -285,7 +276,7 @@ var fullWidth = (options.width || 1000),
     margin = {top: 10, right: 65, bottom: 55, left: 65},
     width = fullWidth - margin.left - margin.right,
     height = fullHeight - margin.top - margin.bottom,
-    benchmarks = _copyAndSortResults(data);
+    benchmarks = data;
 
 // data reshape
 
@@ -478,12 +469,21 @@ var options = {
 }
 
 var meanData = [];
+var order = {};
 for (var i = 0; i < data.benchmarks.length; i += 1) {
     var benchmark = data.benchmarks[i];
     meanData.push({
         'name': benchmark['name'],
         'data': benchmark['mean']
-    })
+    });
+}
+
+meanData.sort(function(e1, e2) {
+    return d3.ascending(e1.data.rps, e2.data.rps);
+})
+
+for (var i = 0; i < meanData.length; i += 1) {
+    order[meanData[i].name] = i;
 }
 
 drawBars('#mean-bars', meanData, options);
@@ -503,6 +503,10 @@ for (var i = 0; i < data.concurrency_levels.length; i += 1) {
                 'data': benchmark['variations'][offset]
             });
         }
+
+        queryData.sort(function(e1, e2) {
+            return d3.ascending(order[e1.name], order[e2.name]);
+        });
 
         drawBars('#query-bars-' + offset, queryData, options);
         drawLats('#query-lats-' + offset, queryData, options);
