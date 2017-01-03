@@ -1,2 +1,2 @@
-asyncpg~=0.5.0
+asyncpg~=0.8.0
 numpy~=1.10.4
