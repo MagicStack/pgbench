@@ -1,0 +1,11 @@
+{
+  "setup": "CREATE TABLE _test(a int, b int, c int, d text, e float, f int, g text);",
+  "teardown": "DROP TABLE _test;",
+  "query": "COPY _test(a, b, c, d, e, f, g) FROM STDIN",
+  "args": [
+    {
+      "row": [10, 11, 10, "TESTTESTTEST", 10.333, 12341234, "123412341234"],
+      "count": 10000
+    }
+  ]
+}

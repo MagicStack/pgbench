@@ -15,12 +15,14 @@ const process = require('process');
 
 const argparse = require('argparse');
 const pg = require('pg');
+const pgcopy = require('pg-copy-streams').from;
+const csvwriter = require('csv-write-stream')
 
 
 function _connect(driverName, args, callback) {
     let driver = null;
 
-    if (driverName == 'pg') {
+    if (driverName == 'pg-js') {
         driver = pg;
     } else if (driverName == 'pg-native') {
         driver = pg.native;
@@ -111,74 +113,178 @@ function runner(args, querydata) {
         var run_start = _now();
         var complete = 0;
         var stmt = {text: query, values: query_args};
+        var copy = null;
+
+        if (query.startsWith('COPY ')) {
+            var m = /COPY (\w+)\s*\(\s*((?:\w+)(?:,\s*\w+)*)\s*\)/.exec(query)
+            if (m == null) {
+                throw "Could not parse COPY query";
+            }
+
+            var rowcount = query_args[0]["count"];
+            var row = query_args[0]["row"];
+            var rows = Array(rowcount);
+            for (var i = 0; i < rowcount; i += 1) {
+                rows[i] = row;
+            }
+
+            copy = {
+                "table": m[1],
+                "columns": m[2].split(",").map(v => v.trim()),
+                "rows": rows
+            };
+        }
+
+        if (copy != null && driver == 'pg-native') {
+            cb({code: 3, msg: "pg-native does not support COPY"});
+        }
 
         if (use_prepared_stmt) {
             stmt.name = '_pgbench_query';
         }
 
-        for (var i = 0; i < concurrency; i += 1) {
-            _connect(driver, args, function(err, conn) {
+        var query_runner = function(err, conn) {
+            if (err) {
+                throw err;
+            }
+
+            var queries = 0;
+            var rows = 0;
+            var latency_stats = new Float64Array(timeout_in_us / 10);
+            var min_latency = Infinity;
+            var max_latency = 0.0;
+            var duration_in_us = run_duration * 1000000;
+            var req_start;
+            var req_time;
+
+            var _cb = function(err, result) {
                 if (err) {
                     throw err;
                 }
 
-                var queries = 0;
-                var rows = 0;
-                var latency_stats = new Float64Array(timeout_in_us / 10);
-                var min_latency = Infinity;
-                var max_latency = 0.0;
-                var duration_in_us = run_duration * 1000000;
-                var req_start;
-                var req_time;
+                // Request time in tens of microseconds
+                req_time = Math.round((_now() - req_start) / 10);
 
-                var _cb = function(err, result) {
-                    if (err) {
-                        throw err;
+                if (req_time > max_latency) {
+                    max_latency = req_time;
+                }
+
+                if (req_time < min_latency) {
+                    min_latency = req_time;
+                }
+
+                latency_stats[req_time] += 1;
+                queries += 1;
+                if (Array.isArray(result)) {
+                    result = result[result.length - 1];
+                }
+
+                rows += result.rows.length;
+
+                if (_now() - run_start < duration_in_us) {
+                    req_start = _now();
+                    conn.query(stmt, _cb);
+                } else {
+                    conn.end();
+                    if (report) {
+                        _report_results(queries, rows, latency_stats,
+                                        min_latency, max_latency,
+                                        run_start);
                     }
 
-                    // Request time in tens of microseconds
-                    req_time = Math.round((_now() - req_start) / 10);
-
-                    if (req_time > max_latency) {
-                        max_latency = req_time;
+                    complete += 1;
+                    if (complete == concurrency && cb) {
+                        cb();
                     }
+                }
+            };
 
-                    if (req_time < min_latency) {
-                        min_latency = req_time;
-                    }
+            req_start = _now();
+            conn.query(stmt, _cb);
+        };
 
-                    latency_stats[req_time] += 1;
-                    queries += 1;
-                    rows += result.rows.length;
+        var copy_runner = function(err, conn) {
+            if (err) {
+                throw err;
+            }
 
-                    if (_now() - run_start < duration_in_us) {
-                        req_start = _now();
-                        conn.query(stmt, _cb);
-                    } else {
-                        conn.end();
-                        if (report) {
-                            _report_results(queries, rows, latency_stats,
-                                            min_latency, max_latency,
-                                            run_start);
-                        }
+            var queries = 0;
+            var rows = 0;
+            var latency_stats = new Float64Array(timeout_in_us / 10);
+            var min_latency = Infinity;
+            var max_latency = 0.0;
+            var duration_in_us = run_duration * 1000000;
+            var req_start;
+            var req_time;
 
-                        complete += 1;
-                        if (complete == concurrency && cb) {
-                            cb();
-                        }
-                    }
-                };
-
+            var _start_copy = function(_cb) {
                 req_start = _now();
-                conn.query(stmt, _cb);
-            });
+                var csvstream = csvwriter({
+                    sendHeaders: false,
+                    separator: '\t',
+                    headers: copy.columns
+                });
+                var copystream = conn.query(pgcopy(stmt.text));
+                csvstream.pipe(copystream);
+                copystream.on('end', _cb);
+                copystream.on('error', _cb);
+                for (var row of copy.rows) {
+                   csvstream.write(row);
+                }
+                csvstream.end();
+            }
+
+            var _cb = function(err, result) {
+                if (err) {
+                    throw err;
+                }
+
+                // Request time in tens of microseconds
+                req_time = Math.round((_now() - req_start) / 10);
+
+                if (req_time > max_latency) {
+                    max_latency = req_time;
+                }
+
+                if (req_time < min_latency) {
+                    min_latency = req_time;
+                }
+
+                latency_stats[req_time] += 1;
+                queries += 1;
+                rows += copy.rows.length;
+
+                if (_now() - run_start < duration_in_us) {
+                    _start_copy(_cb);
+                } else {
+                    conn.end();
+                    if (report) {
+                        _report_results(queries, rows, latency_stats,
+                                        min_latency, max_latency,
+                                        run_start);
+                    }
+
+                    complete += 1;
+                    if (complete == concurrency && cb) {
+                        cb();
+                    }
+                }
+            };
+
+            _start_copy(_cb);
+        };
+
+        var runner = copy != null ? copy_runner : query_runner;
+
+        for (var i = 0; i < concurrency; i += 1) {
+            _connect(driver, args, runner);
         }
     }
 
     function _setup(cb) {
         if (setup_query) {
             // pg-native does not like multiple statements in queries
-            _do_run('pg', setup_query, [], 1, 0, false, false, cb);
+            _do_run('pg-js', setup_query, [], 1, 0, false, false, cb);
         } else {
             if (cb) {
                 cb();
@@ -186,9 +292,16 @@ function runner(args, querydata) {
         }
     }
 
+    function _exit(err) {
+        if (err) {
+            console.error(err.msg);
+            process.exit(err.code);
+        }
+    }
+
     function _teardown(cb) {
         if (teardown_query) {
-            _do_run('pg', teardown_query, [], 1, 0, false, false, cb);
+            _do_run('pg-js', teardown_query, [], 1, 0, false, false, cb);
         } else {
             if (cb) {
                 cb();
@@ -198,7 +311,7 @@ function runner(args, querydata) {
 
     function _run() {
         _do_run(args.driver, query, query_args, args.concurrency, duration,
-                true, true, _teardown);
+                true, true, (err) => _teardown(() => _exit(err)));
     }
 
     function _warmup_and_run() {
@@ -258,7 +371,7 @@ function main() {
     parser.addArgument(
         'driver',
         {type: String, help: 'driver implementation to use',
-         choices: ['pg', 'pg-native']})
+         choices: ['pg-js', 'pg-native']})
     parser.addArgument(
         'queryfile',
         {type: String,

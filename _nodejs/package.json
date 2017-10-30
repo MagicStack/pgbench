@@ -1,12 +1,14 @@
 {
-    "name" : "node-postgres-benchmark",
-    "homepage" : "http://some.name/",
-    "version" : "1.0.0",
+    "name": "node-postgres-benchmark",
+    "homepage": "http://some.name/",
+    "version": "1.0.0",
     "private": true,
-    "bugs" : "http://github.com/cdata/somename/issues",
-    "dependencies" : {
+    "bugs": "http://github.com/cdata/somename/issues",
+    "dependencies": {
         "argparse": "~1.0.7",
-        "pg" : "~6.1.0",
-        "pg-native": "~1.10.0"
+        "csv-write-stream": "2.0.0",
+        "pg": "~7.3.0",
+        "pg-copy-streams": "1.2.0",
+        "pg-native": "~2.2.0"
     }
 }

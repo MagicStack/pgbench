@@ -10,6 +10,8 @@
 import argparse
 import asyncio
 from concurrent import futures
+import csv
+import io
 import json
 import re
 import sys
@@ -37,6 +39,18 @@ def psycopg_execute(conn, query, args):
     return len(cur.fetchall())
 
 
+def psycopg_copy(conn, query, args):
+    rows, copy = args[:2]
+    f = io.StringIO()
+    writer = csv.writer(f, delimiter='\t')
+    for row in rows:
+        writer.writerow(row)
+    f.seek(0)
+    cur = conn.cursor()
+    cur.copy_from(f, copy['table'], columns=copy['columns'])
+    return cur.rowcount
+
+
 def pypostgresql_connect(args):
     conn = postgresql.open(user=args.pguser, host=args.pghost,
                            port=args.pgport)
@@ -52,6 +66,7 @@ async def aiopg_connect(args):
     conn = await aiopg.connect(user=args.pguser, host=args.pghost,
                                port=args.pgport)
     return conn
+
 
 async def aiopg_execute(conn, query, args):
     cur = await conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -76,6 +91,14 @@ async def asyncpg_connect(args):
 
 async def asyncpg_execute(conn, query, args):
     return len(await conn.fetch(query, *args))
+
+
+async def asyncpg_copy(conn, query, args):
+    rows, copy = args[:2]
+    result = await conn.copy_records_to_table(
+        copy['table'], columns=copy['columns'], records=rows)
+    cmd, _, count = result.rpartition(' ')
+    return int(count)
 
 
 async def worker(executor, eargs, start, duration, timeout):
@@ -122,14 +145,30 @@ def sync_worker(executor, eargs, start, duration, timeout):
     return queries, rows, latency_stats, min_latency, max_latency
 
 
-async def runner(args, connector, executor, is_async, arg_format, query,
-                 query_args, setup, teardown):
+async def runner(args, connector, executor, copy_executor, is_async,
+                 arg_format, query, query_args, setup, teardown):
 
     timeout = args.timeout * 1000
     concurrency = args.concurrency
 
     if arg_format == 'python':
         query = re.sub(r'\$\d+', '%s', query)
+
+    if query.startswith('COPY '):
+        if copy_executor is None:
+            raise RuntimeError('COPY is not supported for {}'.format(executor))
+        executor = copy_executor
+
+        match = re.match('COPY (\w+)\s*\(\s*((?:\w+)(?:,\s*\w+)*)\s*\)', query)
+        if not match:
+            raise RuntimeError('could not parse COPY query')
+
+        query_info = query_args[0]
+        query_args[0] = [query_info['row']] * query_info['count']
+        query_args.append({
+            'table': match.group(1),
+            'columns': [col.strip() for col in match.group(2).split(',')]
+        })
 
     conns = []
 
@@ -180,15 +219,15 @@ async def runner(args, connector, executor, is_async, arg_format, query,
         results, duration = await _do_run(args.duration)
 
     finally:
+        for conn in conns:
+            if is_async:
+                await conn.close()
+            else:
+                conn.close()
+
         if teardown:
             await admin_conn.execute(teardown)
             await admin_conn.close()
-
-    for conn in conns:
-        if is_async:
-            await conn.close()
-        else:
-            conn.close()
 
     min_latency = float('inf')
     max_latency = 0.0
@@ -287,20 +326,34 @@ if __name__ == '__main__':
     if setup and not teardown:
         die('"setup" is present, but "teardown" is missing in query JSON')
 
+    copy_executor = None
+
     if args.driver == 'aiopg':
-        connector, executor = aiopg_connect, aiopg_execute
-        is_async = True
+        if query.startswith('COPY '):
+            connector, executor, copy_executor = \
+                psycopg_connect, psycopg_execute, psycopg_copy
+            is_async = False
+        else:
+            connector, executor = aiopg_connect, aiopg_execute
+            is_async = True
         arg_format = 'python'
     elif args.driver == 'aiopg-tuples':
-        connector, executor = aiopg_tuples_connect, aiopg_tuples_execute
-        is_async = True
+        if query.startswith('COPY '):
+            connector, executor, copy_executor = \
+                psycopg_connect, psycopg_execute, psycopg_copy
+            is_async = False
+        else:
+            connector, executor = aiopg_tuples_connect, aiopg_tuples_execute
+            is_async = True
         arg_format = 'python'
     elif args.driver == 'asyncpg':
-        connector, executor = asyncpg_connect, asyncpg_execute
+        connector, executor, copy_executor = \
+            asyncpg_connect, asyncpg_execute, asyncpg_copy
         is_async = True
         arg_format = 'native'
     elif args.driver == 'psycopg':
-        connector, executor = psycopg_connect, psycopg_execute
+        connector, executor, copy_executor = \
+            psycopg_connect, psycopg_execute, psycopg_copy
         is_async = False
         arg_format = 'python'
     elif args.driver == 'postgresql':
@@ -310,6 +363,6 @@ if __name__ == '__main__':
     else:
         raise ValueError('unexpected driver: {!r}'.format(args.driver))
 
-    runner_coro = runner(args, connector, executor, is_async, arg_format,
-                         query, query_args, setup, teardown)
+    runner_coro = runner(args, connector, executor, copy_executor, is_async,
+                         arg_format, query, query_args, setup, teardown)
     loop.run_until_complete(runner_coro)

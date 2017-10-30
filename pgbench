@@ -133,7 +133,10 @@ def _geom_mean(values):
         p *= val
         root += 1
 
-    return p ** (1.0 / root)
+    if root != 0:
+        return p ** (1.0 / root)
+    else:
+        return 0
 
 
 def mean_latency_stats(data):
@@ -211,8 +214,12 @@ def format_report(data, target_file):
     entries = collections.OrderedDict()
 
     for benchmark in data['benchmarks']:
-        entry = {}
+        variations = benchmark['variations']
 
+        if not variations:
+            continue
+
+        entry = {}
         bname = benchmark['name']
 
         try:
@@ -231,7 +238,6 @@ def format_report(data, target_file):
             }
 
         brecords = entry['benchmarks']
-        variations = benchmark['variations']
 
         bmean = benchmark['mean']
 
@@ -251,21 +257,26 @@ def format_report(data, target_file):
         i = 0
         for concurrency in data['concurrency_levels']:
             for query in data['querynames']:
-                variation = variations[i]
-                i += 1
+                try:
+                    variation = variations[i]
+                except IndexError:
+                    for k, v in brecords.items():
+                        v.append('N/A')
+                else:
+                    brecords['Queries/sec'].append(
+                        variation['qps'])
+                    brecords['Rows/sec'].append(
+                        '{}'.format(variation['rps']))
+                    brecords['Min latency'].append(
+                        '{}ms'.format(variation['latency_min']))
+                    brecords['Mean latency'].append(
+                        '{}ms'.format(variation['latency_mean']))
+                    brecords['Max latency'].append(
+                        '{}ms'.format(variation['latency_max']))
+                    brecords['Latency variation'].append('{}ms ({}%)'.format(
+                        variation['latency_std'], variation['latency_cv']))
 
-                brecords['Queries/sec'].append(
-                    variation['qps'])
-                brecords['Rows/sec'].append(
-                    '{}'.format(variation['rps']))
-                brecords['Min latency'].append(
-                    '{}ms'.format(variation['latency_min']))
-                brecords['Mean latency'].append(
-                    '{}ms'.format(variation['latency_mean']))
-                brecords['Max latency'].append(
-                    '{}ms'.format(variation['latency_max']))
-                brecords['Latency variation'].append('{}ms ({}%)'.format(
-                    variation['latency_std'], variation['latency_cv']))
+                i += 1
 
     vc = len(data['concurrency_levels']) * len(data['querynames'])
 
@@ -354,11 +365,11 @@ def format_report(data, target_file):
 
 BENCHMARKS = [
     'golang-libpq',
+    'golang-pgx',
     'python-aiopg',
     'python-aiopg-tuples',
     'python-asyncpg',
-    'nodejs-pg',
-    'nodejs-pg-native',
+    'nodejs-pg-js',
 ]
 
 
@@ -417,16 +428,18 @@ def run_benchmarks(args, variations, pghost, pgport, pguser):
             runner_proc = subprocess.run(
                 cmdline, stdout=subprocess.PIPE, stderr=sys.stderr)
 
-            if runner_proc.returncode != 0:
+            if runner_proc.returncode == 3:
+                # query not supported by the runner
+                continue
+            elif runner_proc.returncode != 0:
                 msg = 'fatal: benchmark runner exited with exit ' \
                       'code {}'.format(runner_proc.returncode)
                 print(msg)
                 sys.exit(runner_proc.returncode)
-
-            data = process_results(runner_proc.stdout.decode('utf-8'))
-            benchmark_data['variations'].append(data)
-
-            print(format_text(data))
+            else:
+                data = process_results(runner_proc.stdout.decode('utf-8'))
+                benchmark_data['variations'].append(data)
+                print(format_text(data))
 
         mean = mean_latency_stats(benchmark_data['variations'])
         benchmark_data['mean'] = mean
