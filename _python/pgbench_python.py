@@ -48,6 +48,7 @@ def psycopg_copy(conn, query, args):
     f.seek(0)
     cur = conn.cursor()
     cur.copy_from(f, copy['table'], columns=copy['columns'])
+    conn.commit()
     return cur.rowcount
 
 
@@ -154,7 +155,9 @@ async def runner(args, connector, executor, copy_executor, is_async,
     if arg_format == 'python':
         query = re.sub(r'\$\d+', '%s', query)
 
-    if query.startswith('COPY '):
+    is_copy = query.startswith('COPY ')
+
+    if is_copy:
         if copy_executor is None:
             raise RuntimeError('COPY is not supported for {}'.format(executor))
         executor = copy_executor
@@ -213,51 +216,67 @@ async def runner(args, connector, executor, copy_executor, is_async,
         await admin_conn.execute(setup)
 
     try:
-        if args.warmup_time:
-            await _do_run(args.warmup_time)
+        try:
+            if args.warmup_time:
+                await _do_run(args.warmup_time)
 
-        results, duration = await _do_run(args.duration)
+            results, duration = await _do_run(args.duration)
+        finally:
+            for conn in conns:
+                if is_async:
+                    await conn.close()
+                else:
+                    conn.close()
+
+        min_latency = float('inf')
+        max_latency = 0.0
+        queries = 0
+        rows = 0
+        latency_stats = None
+
+        for result in results:
+            t_queries, t_rows, t_latency_stats, t_min_latency, t_max_latency =\
+                result
+            queries += t_queries
+            rows += t_rows
+            if latency_stats is None:
+                latency_stats = t_latency_stats
+            else:
+                latency_stats = np.add(latency_stats, t_latency_stats)
+            if t_max_latency > max_latency:
+                max_latency = t_max_latency
+            if t_min_latency < min_latency:
+                min_latency = t_min_latency
+
+        if is_copy:
+            copyargs = query_args[-1]
+
+            rowcount = await admin_conn.fetchval('''
+                SELECT
+                    count(*)
+                FROM
+                    "{tabname}"
+            '''.format(tabname=copyargs['table']))
+
+            print(rowcount, file=sys.stderr)
+
+            if rowcount < len(query_args[0]) * queries:
+                raise RuntimeError(
+                    'COPY did not insert the expected number of rows')
+
+        data = {
+            'queries': queries,
+            'rows': rows,
+            'duration': duration,
+            'min_latency': min_latency,
+            'max_latency': max_latency,
+            'latency_stats': latency_stats.tolist(),
+            'output_format': args.output_format
+        }
 
     finally:
-        for conn in conns:
-            if is_async:
-                await conn.close()
-            else:
-                conn.close()
-
         if teardown:
             await admin_conn.execute(teardown)
-            await admin_conn.close()
-
-    min_latency = float('inf')
-    max_latency = 0.0
-    queries = 0
-    rows = 0
-    latency_stats = None
-
-    for result in results:
-        t_queries, t_rows, t_latency_stats, t_min_latency, t_max_latency = \
-            result
-        queries += t_queries
-        rows += t_rows
-        if latency_stats is None:
-            latency_stats = t_latency_stats
-        else:
-            latency_stats = np.add(latency_stats, t_latency_stats)
-        if t_max_latency > max_latency:
-            max_latency = t_max_latency
-        if t_min_latency < min_latency:
-            min_latency = t_min_latency
-
-    data = {
-        'queries': queries,
-        'rows': rows,
-        'duration': duration,
-        'min_latency': min_latency,
-        'max_latency': max_latency,
-        'latency_stats': latency_stats.tolist(),
-        'output_format': args.output_format
-    }
 
     print(json.dumps(data))
 

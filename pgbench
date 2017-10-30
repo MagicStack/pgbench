@@ -324,7 +324,7 @@ def format_report(data, target_file):
             '''<tr class="benchmark">
                 <td>{name}</td>
                 {empty_tds}
-            </tr>'''.format(name=bname, empty_tds='<td></td>' * vc)
+            </tr>'''.format(name=bname, empty_tds='<td></td>' * (vc + 1))
         )
 
         for metric, metric_data in entry['benchmarks'].items():
