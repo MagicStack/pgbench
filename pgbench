@@ -23,6 +23,7 @@ import sys
 import warnings
 
 import asyncpg.cluster
+import distro
 import numpy as np
 
 
@@ -42,17 +43,7 @@ def platform_info():
                     break
 
     if 'Linux' in system:
-
-        with warnings.catch_warnings():
-            # see issue #1322 for more information
-            warnings.filterwarnings(
-                'ignore',
-                'dist\(\) and linux_distribution\(\) '
-                'functions are deprecated .*',
-                PendingDeprecationWarning,
-            )
-            distname, distversion, distid = platform.dist('')
-
+        distname, distversion, distid = distro.linux_distribution()
         distribution = '{} {}'.format(distname, distversion).strip()
 
     else:
