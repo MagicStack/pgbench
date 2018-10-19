@@ -16,6 +16,7 @@ const process = require('process');
 const argparse = require('argparse');
 const pg = require('pg');
 const pgcopy = require('pg-copy-streams').from;
+const tspostgres = require('ts-postgres');
 const csvwriter = require('csv-write-stream')
 
 
@@ -26,6 +27,33 @@ function _connect(driverName, args, callback) {
         driver = pg;
     } else if (driverName == 'pg-native') {
         driver = pg.native;
+    } else if (driverName == 'ts-postgres') {
+        driver = {
+            'Client': function(config) {
+                var client = new tspostgres.Client(config);
+                return {
+                    connect: function(callback) {
+                        client.connect()
+                            .then(function() { callback(null); })
+                            .catch(function(err) { callback(err); });
+                    },
+                    end: function() {
+                        client.end();
+                    },
+                    query: function(stmt, cb) {
+                        client.query(stmt)
+                            .then(
+                                function(result) { cb(null, result); }
+                            )
+                            .catch(
+                                function(err) {
+                                    cb(err, null);
+                                }
+                            );
+                    }
+                }
+            }
+        };
     } else {
         throw new Error('unexected driver: ' + driverName)
     }
@@ -135,8 +163,9 @@ function runner(args, querydata) {
             };
         }
 
-        if (copy != null && driver == 'pg-native') {
-            cb({code: 3, msg: "pg-native does not support COPY"});
+        if (copy != null && driver !== 'pg-js') {
+            cb({code: 3, msg: driver + " does not support COPY"});
+            return;
         }
 
         if (use_prepared_stmt) {
@@ -283,8 +312,12 @@ function runner(args, querydata) {
 
     function _setup(cb) {
         if (setup_query) {
-            // pg-native does not like multiple statements in queries
-            _do_run('pg-js', setup_query, [], 1, 0, false, false, cb);
+            function go(queries) {
+                var query = queries.shift();
+                var next = (query) ? function() { go(queries) } : cb;
+                _do_run(args.driver, query, [], 1, 0, false, false, next);
+            }
+            go(setup_query.split(';'));
         } else {
             if (cb) {
                 cb();
@@ -301,7 +334,7 @@ function runner(args, querydata) {
 
     function _teardown(cb) {
         if (teardown_query) {
-            _do_run('pg-js', teardown_query, [], 1, 0, false, false, cb);
+            _do_run(args.driver, teardown_query, [], 1, 0, false, false, cb);
         } else {
             if (cb) {
                 cb();
@@ -371,7 +404,7 @@ function main() {
     parser.addArgument(
         'driver',
         {type: String, help: 'driver implementation to use',
-         choices: ['pg-js', 'pg-native']})
+         choices: ['pg-js', 'pg-native', 'ts-postgres']})
     parser.addArgument(
         'queryfile',
         {type: String,

@@ -361,6 +361,8 @@ BENCHMARKS = [
     'python-aiopg-tuples',
     'python-asyncpg',
     'nodejs-pg-js',
+    'nodejs-pg-native',
+    'nodejs-ts-postgres'
 ]
 
 
