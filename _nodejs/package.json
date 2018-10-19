@@ -9,6 +9,7 @@
         "csv-write-stream": "2.0.0",
         "pg": "~7.4.3",
         "pg-copy-streams": "1.2.0",
-        "pg-native": "~3.0.0"
+        "pg-native": "~3.0.0",
+        "ts-postgres": "~1.0.0-rc2"
     }
 }
