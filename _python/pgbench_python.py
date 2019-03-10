@@ -191,7 +191,7 @@ async def runner(args, connector, executor, copy_executor, is_async,
             # Asyncio driver
             for i in range(concurrency):
                 task = worker(executor, [conns[i], query, query_args],
-                              start, args.duration, timeout)
+                              start, run_duration, timeout)
                 tasks.append(task)
 
             results = await asyncio.gather(*tasks)
