@@ -321,11 +321,11 @@ function runner(args, querydata) {
                     headers: copy.columns
                 });
                 var copystream = conn.query(pgcopy(stmt.text));
-                csvstream.pipe(copystream);
-                copystream.on('end', _cb);
+                copystream.on('finish', _cb);
                 copystream.on('error', _cb);
+                csvstream.pipe(copystream);
                 for (var row of copy.rows) {
-                   csvstream.write(row);
+                    csvstream.write(row);
                 }
                 csvstream.end();
             }
