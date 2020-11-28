@@ -142,6 +142,7 @@ function runner(args, querydata) {
         var complete = 0;
         var stmt = {text: query, values: query_args};
         var copy = null;
+        var batch = null;
 
         if (query.startsWith('COPY ')) {
             var m = /COPY (\w+)\s*\(\s*((?:\w+)(?:,\s*\w+)*)\s*\)/.exec(query)
@@ -166,6 +167,11 @@ function runner(args, querydata) {
         if (copy != null && driver !== 'pg-js') {
             cb({code: 3, msg: driver + " does not support COPY"});
             return;
+        }
+
+        if (query_args.length > 0 && query_args[0].constructor === Object) {
+            batch = query_args[0];
+            stmt.values = batch.row;
         }
 
         if (use_prepared_stmt) {
@@ -219,6 +225,67 @@ function runner(args, querydata) {
                         _report_results(queries, rows, latency_stats,
                                         min_latency, max_latency,
                                         run_start);
+                    }
+
+                    complete += 1;
+                    if (complete == concurrency && cb) {
+                        cb();
+                    }
+                }
+            };
+
+            req_start = _now();
+            conn.query(stmt, _cb);
+        };
+
+        var batch_runner = function(err, conn) {
+            if (err) {
+                throw err;
+            }
+
+            var queries = 0;
+            var queries_in_batch = 0;
+            var rows = 0;
+            var latency_stats = new Float64Array(timeout_in_us / 10);
+            var min_latency = Infinity;
+            var max_latency = 0.0;
+            var duration_in_us = run_duration * 1000000;
+            var req_start;
+            var req_time;
+
+            var _cb = function(err, result) {
+                if (err) {
+                    throw err;
+                }
+
+                // Request time in tens of microseconds
+                req_time = Math.round((_now() - req_start) / 10);
+
+                if (req_time > max_latency) {
+                    max_latency = req_time;
+                }
+
+                if (req_time < min_latency) {
+                    min_latency = req_time;
+                }
+
+                latency_stats[req_time] += 1;
+                queries_in_batch += 1;
+                if (queries_in_batch >= batch["count"]) {
+                    queries += 1;
+                    queries_in_batch = 0;
+                }
+                rows += 1;
+
+                if (_now() - run_start < duration_in_us) {
+                    req_start = _now();
+                    conn.query(stmt, _cb);
+                } else {
+                    conn.end();
+                    if (report) {
+                        _report_results(queries, rows, latency_stats,
+                            min_latency, max_latency,
+                            run_start);
                     }
 
                     complete += 1;
@@ -303,7 +370,7 @@ function runner(args, querydata) {
             _start_copy(_cb);
         };
 
-        var runner = copy != null ? copy_runner : query_runner;
+        var runner = copy != null ? copy_runner : (batch != null ? batch_runner : query_runner);
 
         for (var i = 0; i < concurrency; i += 1) {
             _connect(driver, args, runner);
