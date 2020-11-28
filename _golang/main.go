@@ -1,16 +1,18 @@
 package main
 
 import (
+	"context"
 	sql "database/sql"
 	"encoding/json"
 	"fmt"
-	pq "github.com/lib/pq"
 	"github.com/jackc/pgx"
+	pq "github.com/lib/pq"
 	"gopkg.in/alecthomas/kingpin.v2"
 	"io/ioutil"
 	"log"
 	"math"
 	"os"
+	"reflect"
 	"regexp"
 	"runtime"
 	"strings"
@@ -23,20 +25,17 @@ type WorkerFunc func(time.Time, time.Duration, time.Duration,
 	string, []interface{},
 	*sync.WaitGroup, ReportFunc)
 
-
 type TypeCaster func(interface{}) interface{}
-
 
 type CopyInfo struct {
 	TableName string
-	Columns	  []string
-	Types	  []TypeCaster
-	Rows	  [][]interface{}
+	Columns   []string
+	Types     []TypeCaster
+	Rows      [][]interface{}
 }
 
-
 func get_type_casters() map[string]TypeCaster {
-	cast_map := map[string] TypeCaster {
+	cast_map := map[string]TypeCaster{
 		"int4": func(v interface{}) interface{} {
 			i := int(v.(float64))
 			return i
@@ -54,7 +53,6 @@ func get_type_casters() map[string]TypeCaster {
 	return cast_map
 }
 
-
 func get_copy_info(db *sql.DB, query string, args []interface{}) CopyInfo {
 	re := regexp.MustCompile(`COPY (\w+)\s*\(\s*((?:\w+)(?:,\s*\w+)*)\s*\)`)
 	match := re.FindStringSubmatch(query)
@@ -67,7 +65,7 @@ func get_copy_info(db *sql.DB, query string, args []interface{}) CopyInfo {
 
 	col_parts := strings.Split(match[2], ",")
 	cols := make([]string, len(col_parts))
-	for i, cp := range(col_parts) {
+	for i, cp := range col_parts {
 		cols[i] = strings.Trim(cp, " ")
 	}
 
@@ -144,12 +142,11 @@ func get_copy_info(db *sql.DB, query string, args []interface{}) CopyInfo {
 
 	return CopyInfo{
 		TableName: table,
-		Columns: cols,
-		Types: casters,
-		Rows: copyrows,
+		Columns:   cols,
+		Types:     casters,
+		Rows:      copyrows,
 	}
 }
-
 
 func lib_pq_worker(
 	start time.Time, duration time.Duration, timeout time.Duration,
@@ -217,6 +214,56 @@ func lib_pq_worker(
 			}
 			queries += 1
 			nrows += int64(len(copy.Rows))
+			if duration == 0 {
+				break
+			}
+		}
+	} else if len(query_args) > 0 && reflect.ValueOf(query_args[0]).Kind() == reflect.Map {
+		args := query_args[0].(map[string]interface{})
+		row := args["row"].([]interface{})
+		count := int(args["count"].(float64))
+
+
+		for time.Since(start) < duration || duration == 0 {
+			req_start := time.Now()
+
+			txn, err := db.Begin()
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			stmt, err := txn.Prepare(query)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			for i := 0; i < count; i++ {
+				_, err := stmt.Exec(row...)
+				if err != nil {
+					log.Fatal(err)
+				}
+				nrows += 1
+			}
+
+			err = stmt.Close()
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			err = txn.Commit()
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			req_time := time.Since(req_start).Nanoseconds() / 1000 / 10
+			latency_stats[req_time] += 1
+			if req_time > max_latency {
+				max_latency = req_time
+			}
+			if req_time < min_latency {
+				min_latency = req_time
+			}
+			queries += 1
 			if duration == 0 {
 				break
 			}
@@ -310,16 +357,11 @@ func pgx_worker(
 	}
 	defer adminConn.Close()
 
-	db, err := pgx.Connect(pgx.ConnConfig{
-		Host:     *pghost,
-		Port:     uint16(*pgport),
-		Database: *pgdatabase,
-		User:     *pguser,
-	})
+	db, err := pgx.Connect(context.Background(), conninfo)
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer db.Close()
+	defer db.Close(context.Background())
 
 	latency_stats := make([]int64, timeout/1000/10)
 	min_latency := int64(math.MaxInt64)
@@ -334,9 +376,10 @@ func pgx_worker(
 			req_start := time.Now()
 
 			copy_count, err := db.CopyFrom(
-			    pgx.Identifier{copy.TableName},
-			    copy.Columns,
-			    pgx.CopyFromRows(copy.Rows),
+				context.Background(),
+				pgx.Identifier{copy.TableName},
+				copy.Columns,
+				pgx.CopyFromRows(copy.Rows),
 			)
 
 			if err != nil {
@@ -357,20 +400,68 @@ func pgx_worker(
 				break
 			}
 		}
-	} else {
-		fixed_query_args := make([]interface{}, len(query_args))
-		for i, arg := range query_args {
-			fixed_query_args[i] = fmt.Sprintf("%v", arg)
-		}
+	} else if len(query_args) > 0 && reflect.ValueOf(query_args[0]).Kind() == reflect.Map {
+		args := query_args[0].(map[string]interface{})
+		row := args["row"].([]interface{})
+		count := int(args["count"].(float64))
 
-		_, err = db.Prepare("testquery", query)
+		_, err = db.Prepare(context.Background(), "testquery", query)
 		if err != nil {
 			log.Fatal(err)
 		}
 
 		for time.Since(start) < duration || duration == 0 {
 			req_start := time.Now()
-			rows, err := db.Query("testquery", fixed_query_args...)
+
+			batch := &pgx.Batch{}
+			for i := 0; i < count; i++ {
+				batch.Queue("testquery", row...)
+			}
+
+			br := db.SendBatch(context.Background(), batch)
+			for i := 0; i < count; i++ {
+				rows, err := br.Query()
+				if err != nil {
+					log.Fatal(err)
+				}
+				if rows.Err() != nil {
+					log.Fatal(rows.Err())
+				}
+				nrows += 1
+			}
+
+			err = br.Close()
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			req_time := time.Since(req_start).Nanoseconds() / 1000 / 10
+			latency_stats[req_time] += 1
+			if req_time > max_latency {
+				max_latency = req_time
+			}
+			if req_time < min_latency {
+				min_latency = req_time
+			}
+			queries += 1
+			if duration == 0 {
+				break
+			}
+		}
+	} else {
+		fixed_query_args := make([]interface{}, len(query_args))
+		for i, arg := range query_args {
+			fixed_query_args[i] = fmt.Sprintf("%v", arg)
+		}
+
+		_, err = db.Prepare(context.Background(), "testquery", query)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		for time.Since(start) < duration || duration == 0 {
+			req_start := time.Now()
+			rows, err := db.Query(context.Background(), "testquery", fixed_query_args...)
 			if err != nil {
 				log.Fatal(err)
 			}
