@@ -12,6 +12,7 @@ import asyncio
 from concurrent import futures
 import csv
 import io
+import itertools
 import json
 import re
 import sys
@@ -25,6 +26,18 @@ import asyncpg
 import postgresql
 import psycopg2
 import psycopg2.extras
+
+
+def _chunks(iterable, n):
+    i = 0
+
+    def _ctr(_):
+        nonlocal i
+        k = i // n
+        i += 1
+        return k
+    for _, g in itertools.groupby(iterable, _ctr):
+        yield g
 
 
 def psycopg_connect(args):
@@ -77,12 +90,16 @@ async def aiopg_execute(conn, query, args):
     return rv
 
 
+async def _aiopg_executemany(cursor, query, rows):
+    for batch in _chunks(rows, n=100):
+        sqls = [cursor.mogrify(query, args) for args in batch]
+        await cursor.execute(b";".join(sqls))
+    return len(rows)
+
+
 async def aiopg_executemany(conn, query, rows):
     cur = await conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    rv = 0
-    for args in rows:
-        await cur.execute(query, args)
-        rv += cur.rowcount
+    rv = await _aiopg_executemany(cur, query, rows)
     cur.close()
     return rv
 
@@ -100,10 +117,7 @@ async def aiopg_tuples_execute(conn, query, args):
 
 async def aiopg_tuples_executemany(conn, query, rows):
     cur = await conn.cursor()
-    rv = 0
-    for args in rows:
-        await cur.execute(query, args)
-        rv += cur.rowcount
+    rv = await _aiopg_executemany(cur, query, rows)
     cur.close()
     return rv
 
