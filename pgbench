@@ -365,7 +365,7 @@ BENCHMARKS = [
 ]
 
 
-def run_benchmarks(args, variations, pghost, pgport, pguser):
+def run_benchmarks(args, variations, pghost, pgport, pguser, pgdb):
     if args.benchmark:
         benchmarks_to_run = [re.compile(b) for b in args.benchmark]
     else:
@@ -394,6 +394,7 @@ def run_benchmarks(args, variations, pghost, pgport, pguser):
             'pghost': pghost,
             'pgport': pgport,
             'pguser': pguser,
+            'pgdb': pgdb,
             'output-format': 'json'
         }
 
@@ -478,6 +479,8 @@ def main():
         '--pguser', type=str, default='postgres',
         help='PostgreSQL server user')
     parser.add_argument(
+        '--pgdb', type=str, help='database string')
+    parser.add_argument(
         '--queryfiles', help='comma-separated list of files with queries')
     parser.add_argument(
         'benchmark', help='benchmark(s) to run (omit to run all benchmarks)',
@@ -533,13 +536,14 @@ def main():
         conn_spec = {
             'host': args.pghost,
             'port': args.pgport,
-            'user': args.pguser
+            'user': args.pguser,
+            'database': args.pgdb
         }
 
     try:
         benchmarks_data = run_benchmarks(
             args, variations, conn_spec['host'],
-            conn_spec['port'], conn_spec['user'])
+            conn_spec['port'], conn_spec['user'], conn_spec['database'])
     finally:
         if pg_cluster is not None:
             pg_cluster.stop()

@@ -42,7 +42,7 @@ def _chunks(iterable, n):
 
 def psycopg_connect(args):
     conn = psycopg2.connect(user=args.pguser, host=args.pghost,
-                            port=args.pgport)
+                            port=args.pgport, database=args.pgdb)
     return conn
 
 
@@ -67,7 +67,7 @@ def psycopg_copy(conn, query, args):
 
 def pypostgresql_connect(args):
     conn = postgresql.open(user=args.pguser, host=args.pghost,
-                           port=args.pgport)
+                           port=args.pgport, database=args.pgdb)
     return conn
 
 
@@ -78,7 +78,7 @@ def pypostgresql_execute(conn, query, args):
 
 async def aiopg_connect(args):
     conn = await aiopg.connect(user=args.pguser, host=args.pghost,
-                               port=args.pgport)
+                               port=args.pgport, database=args.pgdb)
     return conn
 
 
@@ -124,7 +124,7 @@ async def aiopg_tuples_executemany(conn, query, rows):
 
 async def asyncpg_connect(args):
     conn = await asyncpg.connect(user=args.pguser, host=args.pghost,
-                                 port=args.pgport)
+                                 port=args.pgport, database=args.pgdb)
     return conn
 
 
@@ -346,6 +346,8 @@ if __name__ == '__main__':
     parser.add_argument(
         '-C', '--concurrency', type=int, default=10,
         help='number of concurrent connections')
+    parser.add_argument(
+        '--pgdb', '--database', type=str, help='database')
     parser.add_argument(
         '-D', '--duration', type=int, default=30,
         help='duration of test in seconds')
