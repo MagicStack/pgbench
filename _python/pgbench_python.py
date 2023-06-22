@@ -510,8 +510,10 @@ if __name__ == '__main__':
         is_async = False
         arg_format = 'python'
     elif args.driver == 'psycopg3-async':
-        connector, executor, copy_executor, batch_executor = \
-            async_psycopg_connect, async_psycopg_execute, async_psycopg_copy, async_psycopg_executemany
+        connector, executor, copy_executor, batch_executor = (
+            async_psycopg_connect, async_psycopg_execute, 
+            async_psycopg_copy, async_psycopg_executemany,
+        )
         is_async = True
         arg_format = 'python'
     elif args.driver == 'postgresql':
