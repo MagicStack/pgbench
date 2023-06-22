@@ -160,8 +160,8 @@ async def asyncpg_connect(args):
 
 
 async def async_psycopg_connect(args):
-    conn = await psycopg.AsyncConnection.connect(user=args.pguser, host=args.pghost,
-                                 port=args.pgport)
+    conn = await psycopg.AsyncConnection.connect(
+        user=args.pguser, host=args.pghost, port=args.pgport)
     return conn
 
 
