@@ -360,6 +360,7 @@ BENCHMARKS = [
     'python-aiopg',
     'python-aiopg-tuples',
     'python-asyncpg',
+    'python-psycopg3-async',
     'nodejs-pg-js',
     'nodejs-ts-postgres'
 ]

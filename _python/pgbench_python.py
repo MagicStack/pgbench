@@ -201,7 +201,7 @@ async def async_psycopg_copy(conn, query, args):
     for row in rows:
         writer.writerow(row)
     f.seek(0)
-    
+
     async with conn.cursor() as cur:
         async with cur.copy(query) as copy:
             await copy.write(f.read())
@@ -442,6 +442,7 @@ if __name__ == '__main__':
             'psycopg3-async',
             'postgresql'
         ],
+    )
     parser.add_argument(
         'queryfile', help='file to read benchmark query information from')
 
@@ -499,7 +500,7 @@ if __name__ == '__main__':
         arg_format = 'native'
     elif args.driver == 'psycopg2':
         connector, executor, copy_executor, batch_executor = (
-            psycopg2_connect, psycopg2_execute, 
+            psycopg2_connect, psycopg2_execute,
             psycopg2_copy, psycopg2_executemany,
         )
         is_async = False
@@ -511,7 +512,7 @@ if __name__ == '__main__':
         arg_format = 'python'
     elif args.driver == 'psycopg3-async':
         connector, executor, copy_executor, batch_executor = (
-            async_psycopg_connect, async_psycopg_execute, 
+            async_psycopg_connect, async_psycopg_execute,
             async_psycopg_copy, async_psycopg_executemany,
         )
         is_async = True
