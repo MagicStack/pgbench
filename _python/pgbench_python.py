@@ -499,7 +499,7 @@ if __name__ == '__main__':
             psycopg_connect, psycopg_execute, psycopg_copy, psycopg_executemany
         is_async = False
         arg_format = 'python'
-    elif args.driver == 'psycopg3[async]':
+    elif args.driver == 'psycopg3-async':
         connector, executor, copy_executor, batch_executor = \
             async_psycopg_connect, async_psycopg_execute, async_psycopg_copy, async_psycopg_executemany
         is_async = True
