@@ -5,10 +5,10 @@
     "private": true,
     "bugs": "http://github.com/cdata/somename/issues",
     "dependencies": {
-        "argparse": "~1.0.10",
+        "argparse": "~2.0.1",
         "csv-write-stream": "2.0.0",
-        "pg": "~8.5.1",
-        "pg-copy-streams": "5.1.1",
-        "ts-postgres": "~1.1.3"
+        "pg": "~8.11.0",
+        "pg-copy-streams": "6.0.5",
+        "ts-postgres": "~1.3.1"
     }
 }

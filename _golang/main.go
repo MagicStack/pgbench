@@ -5,9 +5,6 @@ import (
 	sql "database/sql"
 	"encoding/json"
 	"fmt"
-	"github.com/jackc/pgx"
-	pq "github.com/lib/pq"
-	"gopkg.in/alecthomas/kingpin.v2"
 	"io/ioutil"
 	"log"
 	"math"
@@ -18,6 +15,10 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/alecthomas/kingpin/v2"
+	"github.com/jackc/pgx/v5"
+	pq "github.com/lib/pq"
 )
 
 type ReportFunc func(int64, int64, int64, int64, []int64)
@@ -222,7 +223,6 @@ func lib_pq_worker(
 		args := query_args[0].(map[string]interface{})
 		row := args["row"].([]interface{})
 		count := int(args["count"].(float64))
-
 
 		for time.Since(start) < duration || duration == 0 {
 			req_start := time.Now()

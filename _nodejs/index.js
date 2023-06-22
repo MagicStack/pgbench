@@ -431,53 +431,53 @@ function runner(args, querydata) {
 
 function main() {
     let parser = argparse.ArgumentParser({
-        addHelp: true,
+        add_help: true,
         description: 'async pg driver benchmark [concurrent]'
     })
 
-    parser.addArgument(
+    parser.add_argument(
         '--concurrency',
-        {type: Number, defaultValue: 10,
+        {type: Number, default: 10,
          help: 'number of concurrent connections'})
-    parser.addArgument(
+    parser.add_argument(
         '--duration',
-        {type: Number, defaultValue: 30,
+        {type: Number, default: 30,
          help: 'duration of test in seconds'})
-    parser.addArgument(
+    parser.add_argument(
         '--timeout',
-        {type: Number, defaultValue: 2,
+        {type: Number, default: 2,
          help: 'server timeout in seconds'})
-    parser.addArgument(
+    parser.add_argument(
         '--warmup-time',
-        {type: Number, defaultValue: 5,
+        {type: Number, default: 5,
          help: 'duration of warmup period for each benchmark in seconds'})
-    parser.addArgument(
+    parser.add_argument(
         '--output-format',
-        {type: String, defaultValue: 'text',
+        {type: String, default: 'text',
          help: 'output format',
          choices: ['text', 'json']})
-    parser.addArgument(
+    parser.add_argument(
         '--pghost',
-        {type: String, defaultValue: '127.0.0.1',
+        {type: String, default: '127.0.0.1',
          help: 'PostgreSQL server host'})
-    parser.addArgument(
+    parser.add_argument(
         '--pgport',
-        {type: Number, defaultValue: 5432,
+        {type: Number, default: 5432,
          help: 'PostgreSQL server port'})
-    parser.addArgument(
+    parser.add_argument(
         '--pguser',
-        {type: String, defaultValue: 'postgres',
+        {type: String, default: 'postgres',
          help: 'PostgreSQL server user'})
-    parser.addArgument(
+    parser.add_argument(
         'driver',
         {type: String, help: 'driver implementation to use',
          choices: ['pg-js', 'pg-native', 'ts-postgres']})
-    parser.addArgument(
+    parser.add_argument(
         'queryfile',
         {type: String,
          help: 'file to read benchmark query information from'})
 
-    let args = parser.parseArgs();
+    let args = parser.parse_args();
     let queryfile = null;
 
     if (args.queryfile == '-') {
