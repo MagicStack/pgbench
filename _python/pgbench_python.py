@@ -490,8 +490,10 @@ if __name__ == '__main__':
         is_async = True
         arg_format = 'native'
     elif args.driver == 'psycopg2':
-        connector, executor, copy_executor, batch_executor = \
-            psycopg2_connect, psycopg2_execute, psycopg2_copy, psycopg2_executemany
+        connector, executor, copy_executor, batch_executor = (
+            psycopg2_connect, psycopg2_execute, 
+            psycopg2_copy, psycopg2_executemany,
+        )
         is_async = False
         arg_format = 'python'
     elif args.driver == 'psycopg3':
