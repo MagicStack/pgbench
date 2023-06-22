@@ -433,7 +433,15 @@ if __name__ == '__main__':
         help='PostgreSQL server user')
     parser.add_argument(
         'driver', help='driver implementation to use',
-        choices=['aiopg', 'aiopg-tuples', 'asyncpg', 'psycopg2', 'psycopg3', 'psycopg3[async]', 'postgresql'])
+        choices=[
+            'aiopg',
+            'aiopg-tuples',
+            'asyncpg',
+            'psycopg2',
+            'psycopg3',
+            'psycopg3-async',
+            'postgresql'
+        ],
     parser.add_argument(
         'queryfile', help='file to read benchmark query information from')
 
