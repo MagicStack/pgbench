@@ -41,7 +41,7 @@ def _chunks(iterable, n):
 
 
 def psycopg_connect(args):
-    conn = psycopg2.connect(user=args.pguser, host=args.pghost,
+    conn = psycopg.connect(user=args.pguser, host=args.pghost,
                             port=args.pgport)
     return conn
 
