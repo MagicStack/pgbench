@@ -356,6 +356,8 @@ BENCHMARKS = [
     'golang-libpq',
     'golang-pgx',
     'python-aiopg',
+    'python-psycopg2',
+    'python-psycopg3',
     'python-aiopg-tuples',
     'python-asyncpg',
     'python-psycopg3-async',
